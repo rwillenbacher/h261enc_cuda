@@ -3,7 +3,11 @@
 #include <stdio.h>
 #include <windows.h>
 
+#include <cuda_runtime.h>
 #include <cuda.h>
+#include <cuda_runtime_api.h>
+
+#include <cooperative_groups.h>
 
 #include "h261_decl.h"
 
@@ -23,7 +27,9 @@ cudaArray *g_me_gpu_reference_array;
 cudaArray *g_me_gpu_reference_chroma_cb_array;
 cudaArray *g_me_gpu_reference_chroma_cr_array;
 
-texture<unsigned char, 2> g_me_gpu_reference_texture;
+cudaTextureObject_t g_me_gpu_reference_texture;
+cudaTextureObject_t g_me_gpu_reference_texture_cb;
+cudaTextureObject_t g_me_gpu_reference_texture_cr;
 
 
 /* texture for current frame */
@@ -31,7 +37,9 @@ cudaArray *g_me_gpu_current_array;
 cudaArray *g_me_gpu_current_chroma_cb_array;
 cudaArray *g_me_gpu_current_chroma_cr_array;
 
-texture<unsigned char, 2> g_me_gpu_current_texture;
+cudaTextureObject_t g_me_gpu_current_texture;
+cudaTextureObject_t g_me_gpu_current_texture_cb;
+cudaTextureObject_t g_me_gpu_current_texture_cr;
 
 
 typedef struct {
@@ -59,11 +67,11 @@ Void h261_gpu_init( void )
 		
 		printf("device: %s (%d)\n", s_device_prop.name, i_device );
 		printf("compute caps: %d.%d\n", s_device_prop.major, s_device_prop.minor );
-		printf("memory: %d\n", s_device_prop.totalGlobalMem );
+		printf("memory: %zd\n", s_device_prop.totalGlobalMem );
 		printf("processor count: %d\n", s_device_prop.multiProcessorCount );
-		printf("constant memory: %d\n", s_device_prop.totalConstMem );
-		printf("mem per block: %d\n", s_device_prop.sharedMemPerBlock );
-		printf("memstride: %d\n", s_device_prop.memPitch );
+		printf("constant memory: %zd\n", s_device_prop.totalConstMem );
+		printf("mem per block: %zd\n", s_device_prop.sharedMemPerBlock );
+		printf("memstride: %zd\n", s_device_prop.memPitch );
 		printf("max threads: %d\n", s_device_prop.maxThreadsPerBlock );
 		printf("max threads dims: %dx%dx%d\n", s_device_prop.maxThreadsDim[ 0 ],
 				s_device_prop.maxThreadsDim[ 1 ], s_device_prop.maxThreadsDim[ 2 ] );
@@ -82,24 +90,57 @@ Void h261_gpu_init( void )
 Void h261_gpu_device_init_textures( Int32 i_width, Int32 i_height )
 {
 	Int32 i_chroma_width, i_chroma_height;
-	cudaChannelFormatDesc s_texture_desc;
+	cudaResourceDesc s_texture_res;
+	cudaChannelFormatDesc s_texture_channel_desc;
+	cudaTextureDesc s_texture_desc;
 
 	i_chroma_width = i_width / 2;
 	i_chroma_height = i_height / 2;
 
-	s_texture_desc = cudaCreateChannelDesc<unsigned char>();
-	cudaMallocArray( &g_me_gpu_current_array, &s_texture_desc, i_width, i_height );
-	s_texture_desc = cudaCreateChannelDesc<unsigned char>();
-	cudaMallocArray( &g_me_gpu_current_chroma_cb_array, &s_texture_desc, i_chroma_width, i_chroma_height );
-	s_texture_desc = cudaCreateChannelDesc<unsigned char>();
-	cudaMallocArray( &g_me_gpu_current_chroma_cr_array, &s_texture_desc, i_chroma_width, i_chroma_height );
+	s_texture_channel_desc = cudaCreateChannelDesc<unsigned char>();
+	cudaMallocArray( &g_me_gpu_current_array, &s_texture_channel_desc, i_width, i_height );
+	s_texture_channel_desc = cudaCreateChannelDesc<unsigned char>();
+	cudaMallocArray( &g_me_gpu_current_chroma_cb_array, &s_texture_channel_desc, i_chroma_width, i_chroma_height );
+	s_texture_channel_desc = cudaCreateChannelDesc<unsigned char>();
+	cudaMallocArray( &g_me_gpu_current_chroma_cr_array, &s_texture_channel_desc, i_chroma_width, i_chroma_height );
 
-	s_texture_desc = cudaCreateChannelDesc<unsigned char>();
-	cudaMallocArray( &g_me_gpu_reference_array, &s_texture_desc, i_width, i_height );
-	s_texture_desc = cudaCreateChannelDesc<unsigned char>();
-	cudaMallocArray( &g_me_gpu_reference_chroma_cb_array, &s_texture_desc, i_chroma_width, i_chroma_height );
-	s_texture_desc = cudaCreateChannelDesc<unsigned char>();
-	cudaMallocArray( &g_me_gpu_reference_chroma_cr_array, &s_texture_desc, i_chroma_width, i_chroma_height );
+	s_texture_channel_desc = cudaCreateChannelDesc<unsigned char>();
+	cudaMallocArray( &g_me_gpu_reference_array, &s_texture_channel_desc, i_width, i_height );
+	s_texture_channel_desc = cudaCreateChannelDesc<unsigned char>();
+	cudaMallocArray( &g_me_gpu_reference_chroma_cb_array, &s_texture_channel_desc, i_chroma_width, i_chroma_height );
+	s_texture_channel_desc = cudaCreateChannelDesc<unsigned char>();
+	cudaMallocArray( &g_me_gpu_reference_chroma_cr_array, &s_texture_channel_desc, i_chroma_width, i_chroma_height );
+
+	memset( &s_texture_res, 0, sizeof( cudaResourceDesc ) );
+	s_texture_res.resType = cudaResourceTypeArray;
+
+	memset( &s_texture_desc, 0, sizeof( cudaTextureDesc ) );
+	s_texture_desc.normalizedCoords = false;
+	s_texture_desc.filterMode = cudaFilterModePoint;
+	s_texture_desc.addressMode[ 0 ] = cudaAddressModeWrap;
+	s_texture_desc.addressMode[ 1 ] = cudaAddressModeWrap;
+	s_texture_desc.addressMode[ 2 ] = cudaAddressModeWrap;
+	s_texture_desc.readMode = cudaReadModeElementType;
+
+
+	s_texture_res.res.array.array = g_me_gpu_current_array;
+	cudaCreateTextureObject( &g_me_gpu_current_texture, &s_texture_res, &s_texture_desc, NULL );
+
+	s_texture_res.res.array.array = g_me_gpu_current_chroma_cb_array;
+	cudaCreateTextureObject( &g_me_gpu_current_texture_cb, &s_texture_res, &s_texture_desc, NULL );
+
+	s_texture_res.res.array.array = g_me_gpu_current_chroma_cr_array;
+	cudaCreateTextureObject( &g_me_gpu_current_texture_cr, &s_texture_res, &s_texture_desc, NULL );
+
+
+	s_texture_res.res.array.array = g_me_gpu_reference_array;
+	cudaCreateTextureObject( &g_me_gpu_reference_texture, &s_texture_res, &s_texture_desc, NULL );
+
+	s_texture_res.res.array.array = g_me_gpu_reference_chroma_cb_array;
+	cudaCreateTextureObject( &g_me_gpu_reference_texture_cb, &s_texture_res, &s_texture_desc, NULL );
+
+	s_texture_res.res.array.array = g_me_gpu_reference_chroma_cr_array;
+	cudaCreateTextureObject( &g_me_gpu_reference_texture_cr, &s_texture_res, &s_texture_desc, NULL );
 
 }
 
@@ -179,7 +220,7 @@ Void h261_gpu_device_set_reference_chroma_cr( UInt8 *pui8_frame_data, Int32 i_wi
 * motion estimation
 **************************************************************************/
 
-#include "megpu_kernels.cu"
+#include "megpu_kernels.cuh"
 
 
 Void h261_gpu_device_motion_vector_limits( me_gpu_t *ps_me_gpu )
@@ -225,7 +266,7 @@ Void h261_gpu_device_motion_vector_limits( me_gpu_t *ps_me_gpu )
 
 Void h261_gpu_device_motion_vector_zero_candidates( me_gpu_t *ps_me_gpu )
 {
-	Int32 i_idx;
+	Int32 i_idx, i_y, i_x;
 	for( i_y = 0; i_y < ps_me_gpu->i_mb_height; i_y++ )
 	{
 		for( i_x = 0; i_x < ps_me_gpu->i_mb_width; i_x++ )
@@ -324,8 +365,8 @@ Void h261_gpu_device_me( me_gpu_t *ps_me_gpu )
 
 	d_start = h261_get_time();
 
-	cudaBindTextureToArray( g_me_gpu_current_texture, g_me_gpu_current_array );
-	cudaBindTextureToArray( g_me_gpu_reference_texture, g_me_gpu_reference_array );
+//	cudaBindTextureToArray( g_me_gpu_current_texture, g_me_gpu_current_array );      < CUDA 12.0
+//	cudaBindTextureToArray( g_me_gpu_reference_texture, g_me_gpu_reference_array );  < CUDA 12.0
 	
 	cudaEventRecord( ps_me_gpu_cuda->s_event_start, ps_me_gpu_cuda->s_stream );
 
@@ -333,7 +374,7 @@ Void h261_gpu_device_me( me_gpu_t *ps_me_gpu )
 
 	dim3 d3_grid2( ps_me_gpu->i_mb_width, ps_me_gpu->i_mb_height );
 	dim3 d3_block2( STARTING_VECTOR_DIMENSIONS, STARTING_VECTOR_DIMENSIONS );
-	megpu_get_starting_vector<<< d3_grid2, d3_block2, 0, ps_me_gpu_cuda->s_stream >>>( );
+	megpu_get_starting_vector<<< d3_grid2, d3_block2, 0, ps_me_gpu_cuda->s_stream >>>( g_me_gpu_current_texture, g_me_gpu_reference_texture );
 	
 /*
 	i_block_width = REFINE_STARTING_VECTOR_BLOCK_DIM_X;
@@ -346,7 +387,7 @@ Void h261_gpu_device_me( me_gpu_t *ps_me_gpu )
 
 	dim3 d3_grid3( ps_me_gpu->i_mb_width, ps_me_gpu->i_mb_height );
 	dim3 d3_block3( REFINE_STARTING_VECTOR_DIMENSIONS, REFINE_STARTING_VECTOR_DIMENSIONS );
-	megpu_refine_starting_vector<<< d3_grid3, d3_block3, 0, ps_me_gpu_cuda->s_stream >>>( );
+	megpu_refine_starting_vector<<< d3_grid3, d3_block3, 0, ps_me_gpu_cuda->s_stream>>>( g_me_gpu_current_texture, g_me_gpu_reference_texture );
 
 	i_block_width = EVALUATE_MOTION_VECTOR_BLOCK_DIM_X;
 	i_block_height = EVALUATE_MOTION_VECTOR_BLOCK_DIM_Y;
@@ -355,9 +396,9 @@ Void h261_gpu_device_me( me_gpu_t *ps_me_gpu )
 	dim3 d3_grid4( i_grid_width, i_grid_height );
 	dim3 d3_block4( i_block_width, i_block_height );
 	
-	megpu_evaluate_motion_vector_inter<<< d3_grid4, d3_block4, 0, ps_me_gpu_cuda->s_stream >>>( );
-	megpu_evaluate_motion_vector_inter_filter<<< d3_grid4, d3_block4, 0, ps_me_gpu_cuda->s_stream >>>( );
-	megpu_evaluate_motion_vector_intra<<< d3_grid4, d3_block4, 0, ps_me_gpu_cuda->s_stream >>>( );
+	megpu_evaluate_motion_vector_inter<<< d3_grid4, d3_block4, 0, ps_me_gpu_cuda->s_stream >>>( g_me_gpu_current_texture, g_me_gpu_reference_texture );
+	megpu_evaluate_motion_vector_inter_filter<<< d3_grid4, d3_block4, 0, ps_me_gpu_cuda->s_stream >>>( g_me_gpu_current_texture, g_me_gpu_reference_texture );
+	megpu_evaluate_motion_vector_intra<<< d3_grid4, d3_block4, 0, ps_me_gpu_cuda->s_stream >>>( g_me_gpu_current_texture );
 
 	cudaMemcpyAsync( ps_me_gpu->ps_starting_vector_host, ps_me_gpu->ps_starting_vector_device,
 				sizeof( me_gpu_mv_t ) * ps_me_gpu->i_num_mb, cudaMemcpyDeviceToHost, ps_me_gpu_cuda->s_stream );
@@ -365,7 +406,7 @@ Void h261_gpu_device_me( me_gpu_t *ps_me_gpu )
 	cudaMemcpyAsync( ps_me_gpu->prgs_macroblocks_result, ps_me_gpu->prgs_macroblocks_device,
 				sizeof( me_gpu_mb_t ) * ps_me_gpu->i_num_mb, cudaMemcpyDeviceToHost, ps_me_gpu_cuda->s_stream );
 
-	cudaMemcpyAsync( ps_me_gpu->ps_candidate_vector_device, ps_me_gpu->ps_me_gpu->ps_starting_vector_device,
+	cudaMemcpyAsync( ps_me_gpu->ps_candidate_vector_device, ps_me_gpu->ps_starting_vector_device,
 				sizeof( me_gpu_mv_t ) * ps_me_gpu->i_num_mb, cudaMemcpyDeviceToDevice, ps_me_gpu_cuda->s_stream );
 				
 	cudaEventRecord( ps_me_gpu_cuda->s_event_end, ps_me_gpu_cuda->s_stream );
@@ -380,14 +421,14 @@ Void h261_gpu_device_me( me_gpu_t *ps_me_gpu )
 		ps_me_gpu->prgs_macroblocks_result[ i_idx ].s_16x16_mv.i8_my = ps_me_gpu->ps_starting_vector_host[ i_idx ].i8_my;
 	}
 
-	cudaUnbindTexture( g_me_gpu_current_texture );
-	cudaUnbindTexture( g_me_gpu_reference_texture );
+	//cudaUnbindTexture( g_me_gpu_current_texture );
+	//cudaUnbindTexture( g_me_gpu_reference_texture );
 
 	d_end = h261_get_time();
-	//printf("ME time: %.3f ( %.3f )\n", d_end - d_start, f_elapsed_time );
+	printf("ME time: %.3f ( %.3f )\n", d_end - d_start, f_elapsed_time );
 
-	t_ret = cudaGetLastError();
-	//printf("last error: %s\n", cudaGetErrorString( t_ret ) );
+	t_ret = cudaGetLastError( );
+	printf( "last error: %s\n", cudaGetErrorString( t_ret ) );
 }
 
 
@@ -396,7 +437,7 @@ Void h261_gpu_device_me( me_gpu_t *ps_me_gpu )
 * macroblock coder
 **************************************************************************/
 
-#include "mbgpu_kernels.cu"
+#include "mbgpu_kernels.cuh"
 
 Void h261_init_macroblocks( h261_macroblocks_t **pps_mbs, Int32 i_width, Int32 i_height, Int32 i_denoise )
 {
@@ -550,6 +591,7 @@ Void h261_deinit_macroblocks( h261_macroblocks_t *ps_mbs )
 
 Void h261_gpu_device_encode_macroblocks( h261_context_t *ps_ctx )
 {
+	cudaError_t t_ret;
 	Int32 i_x, i_y, i_num_mb, i_quantiser;
 	Int32 i_block_width, i_block_height, i_grid_width, i_grid_height;
 	double d_start, d_end;
@@ -596,8 +638,8 @@ Void h261_gpu_device_encode_macroblocks( h261_context_t *ps_ctx )
 	cudaMemcpyAsync( ps_mbs->pi_mb_mv_x_device, ps_mbs->pi_mb_mv_x_host, i_num_mb * sizeof( Int32 ), cudaMemcpyHostToDevice, ps_mb_cuda->s_stream );
 	cudaMemcpyAsync( ps_mbs->pi_mb_mv_y_device, ps_mbs->pi_mb_mv_y_host, i_num_mb * sizeof( Int32 ), cudaMemcpyHostToDevice, ps_mb_cuda->s_stream );
 
-	cudaBindTextureToArray( g_me_gpu_current_texture, g_me_gpu_current_array );
-	cudaBindTextureToArray( g_me_gpu_reference_texture, g_me_gpu_reference_array );
+	//cudaBindTextureToArray( g_me_gpu_current_texture, g_me_gpu_current_array );       < CUDA 12.0
+	//cudaBindTextureToArray( g_me_gpu_reference_texture, g_me_gpu_reference_array );   < CUDA 12.0
 
 	i_block_width = SETUP_MACROBLOCKS_LUMA_BLOCK_DIM_X;
 	i_block_height = 1;
@@ -605,13 +647,13 @@ Void h261_gpu_device_encode_macroblocks( h261_context_t *ps_ctx )
 	i_grid_height = 1;
 	dim3 d3_grid( i_grid_width, i_grid_height );
 	dim3 d3_block( i_block_width, i_block_height );
-	macroblocks_setup_luma<<< d3_grid, d3_block, 0, ps_mb_cuda->s_stream >>>( );
+	macroblocks_setup_luma<<< d3_grid, d3_block, 0, ps_mb_cuda->s_stream >>>( g_me_gpu_current_texture, g_me_gpu_reference_texture );
 
-	cudaUnbindTexture( g_me_gpu_current_texture );
-	cudaUnbindTexture( g_me_gpu_reference_texture );
+	//cudaUnbindTexture( g_me_gpu_current_texture );       < CUDA 12.0
+	//cudaUnbindTexture( g_me_gpu_reference_texture );     < CUDA 12.0
 
-	cudaBindTextureToArray( g_me_gpu_current_texture, g_me_gpu_current_chroma_cb_array );
-	cudaBindTextureToArray( g_me_gpu_reference_texture, g_me_gpu_reference_chroma_cb_array );
+	//cudaBindTextureToArray( g_me_gpu_current_texture, g_me_gpu_current_chroma_cb_array );         < CUDA 12.0
+	//cudaBindTextureToArray( g_me_gpu_reference_texture, g_me_gpu_reference_chroma_cb_array );     < CUDA 12.0
 
 	i_block_width = SETUP_MACROBLOCKS_CHROMA_BLOCK_DIM_X;
 	i_block_height = 1;
@@ -619,13 +661,13 @@ Void h261_gpu_device_encode_macroblocks( h261_context_t *ps_ctx )
 	i_grid_height = 1;
 	dim3 d3_grid2( i_grid_width, i_grid_height );
 	dim3 d3_block2( i_block_width, i_block_height );
-	macroblocks_setup_chromab<<< d3_grid2, d3_block2, 0, ps_mb_cuda->s_stream >>>( );
+	macroblocks_setup_chromab<<< d3_grid2, d3_block2, 0, ps_mb_cuda->s_stream >>>( g_me_gpu_current_texture_cb, g_me_gpu_reference_texture_cb );
 
-	cudaUnbindTexture( g_me_gpu_current_texture );
-	cudaUnbindTexture( g_me_gpu_reference_texture );
+	//cudaUnbindTexture( g_me_gpu_current_texture );       < CUDA 12.0
+	//cudaUnbindTexture( g_me_gpu_reference_texture );     < CUDA 12.0
 
-	cudaBindTextureToArray( g_me_gpu_current_texture, g_me_gpu_current_chroma_cr_array );
-	cudaBindTextureToArray( g_me_gpu_reference_texture, g_me_gpu_reference_chroma_cr_array );
+	//cudaBindTextureToArray( g_me_gpu_current_texture, g_me_gpu_current_chroma_cr_array );         < CUDA 12.0
+	//cudaBindTextureToArray( g_me_gpu_reference_texture, g_me_gpu_reference_chroma_cr_array );     < CUDA 12.0
 
 	i_block_width = SETUP_MACROBLOCKS_CHROMA_BLOCK_DIM_X;
 	i_block_height = 1;
@@ -633,10 +675,10 @@ Void h261_gpu_device_encode_macroblocks( h261_context_t *ps_ctx )
 	i_grid_height = 1;
 	dim3 d3_grid3( i_grid_width, i_grid_height );
 	dim3 d3_block3( i_block_width, i_block_height );
-	macroblocks_setup_chromar<<< d3_grid3, d3_block3, 0, ps_mb_cuda->s_stream >>>( );
+	macroblocks_setup_chromar<<< d3_grid3, d3_block3, 0, ps_mb_cuda->s_stream >>>( g_me_gpu_current_texture_cr, g_me_gpu_reference_texture_cr );
 
-	cudaUnbindTexture( g_me_gpu_current_texture );
-	cudaUnbindTexture( g_me_gpu_reference_texture );
+	//cudaUnbindTexture( g_me_gpu_current_texture );    ...
+	//cudaUnbindTexture( g_me_gpu_reference_texture );  ...
 
 	i_block_width = DCT_MACROBLOCKS_BLOCK_DIM_X;
 	i_block_height = 1;
@@ -680,12 +722,16 @@ Void h261_gpu_device_encode_macroblocks( h261_context_t *ps_ctx )
 
 	d_end = h261_get_time();
 
-	//printf("MB coder time: %.3fms ( %f )\n", d_end - d_start, f_elapsed_time );
+	printf("MB coder time: %.3fms ( %f )\n", d_end - d_start, f_elapsed_time );
+
+	t_ret = cudaGetLastError( );
+	printf( "last error: %s\n", cudaGetErrorString( t_ret ) );
 }
 
 
 Void h261_gpu_device_decode_macroblocks( h261_context_t *ps_ctx )
 {
+	cudaError_t t_ret;
 	Int32 i_num_mb;
 	Int32 i_block_width, i_block_height, i_grid_width, i_grid_height;
 	double d_start, d_end;
@@ -719,8 +765,8 @@ Void h261_gpu_device_decode_macroblocks( h261_context_t *ps_ctx )
 	dim3 d3_block2( i_block_width, i_block_height );
 	macroblocks_dct_inverse<<< d3_grid2, d3_block2, 0, ps_mb_cuda->s_stream >>>( );
 
-	cudaBindTextureToArray( g_me_gpu_current_texture, g_me_gpu_current_array );
-	cudaBindTextureToArray( g_me_gpu_reference_texture, g_me_gpu_reference_array );
+	//cudaBindTextureToArray( g_me_gpu_current_texture, g_me_gpu_current_array );      ...
+	//cudaBindTextureToArray( g_me_gpu_reference_texture, g_me_gpu_reference_array );  ...
 
 	i_block_width = RECON_MACROBLOCKS_LUMA_BLOCK_DIM_X;
 	i_block_height = 1;
@@ -728,13 +774,10 @@ Void h261_gpu_device_decode_macroblocks( h261_context_t *ps_ctx )
 	i_grid_height = 1;
 	dim3 d3_grid3( i_grid_width, i_grid_height );
 	dim3 d3_block3( i_block_width, i_block_height );
-	macroblocks_reconstruct_luma<<< d3_grid3, d3_block3, 0, ps_mb_cuda->s_stream >>>( );
+	macroblocks_reconstruct_luma<<< d3_grid3, d3_block3, 0, ps_mb_cuda->s_stream >>>( g_me_gpu_reference_texture );
 
-	cudaUnbindTexture( g_me_gpu_current_texture );
-	cudaUnbindTexture( g_me_gpu_reference_texture );
-
-	cudaBindTextureToArray( g_me_gpu_current_texture, g_me_gpu_current_chroma_cb_array );
-	cudaBindTextureToArray( g_me_gpu_reference_texture, g_me_gpu_reference_chroma_cb_array );
+	//cudaUnbindTexture( g_me_gpu_current_texture );
+	//cudaUnbindTexture( g_me_gpu_reference_texture );
 
 	i_block_width = RECON_MACROBLOCKS_CHROMA_BLOCK_DIM_X;
 	i_block_height = 1;
@@ -742,13 +785,7 @@ Void h261_gpu_device_decode_macroblocks( h261_context_t *ps_ctx )
 	i_grid_height = 1;
 	dim3 d3_grid4( i_grid_width, i_grid_height );
 	dim3 d3_block4( i_block_width, i_block_height );
-	macroblocks_reconstruct_chromab<<< d3_grid4, d3_block4, 0, ps_mb_cuda->s_stream >>>( );
-
-	cudaUnbindTexture( g_me_gpu_current_texture );
-	cudaUnbindTexture( g_me_gpu_reference_texture );
-
-	cudaBindTextureToArray( g_me_gpu_current_texture, g_me_gpu_current_chroma_cr_array );
-	cudaBindTextureToArray( g_me_gpu_reference_texture, g_me_gpu_reference_chroma_cr_array );
+	macroblocks_reconstruct_chromab<<< d3_grid4, d3_block4, 0, ps_mb_cuda->s_stream >>>( g_me_gpu_reference_texture_cb );
 
 	i_block_width = RECON_MACROBLOCKS_CHROMA_BLOCK_DIM_X;
 	i_block_height = 1;
@@ -756,10 +793,7 @@ Void h261_gpu_device_decode_macroblocks( h261_context_t *ps_ctx )
 	i_grid_height = 1;
 	dim3 d3_grid5( i_grid_width, i_grid_height );
 	dim3 d3_block5( i_block_width, i_block_height );
-	macroblocks_reconstruct_chromar<<< d3_grid5, d3_block5, 0, ps_mb_cuda->s_stream >>>( );
-
-	cudaUnbindTexture( g_me_gpu_current_texture );
-	cudaUnbindTexture( g_me_gpu_reference_texture );
+	macroblocks_reconstruct_chromar<<< d3_grid5, d3_block5, 0, ps_mb_cuda->s_stream >>>( g_me_gpu_reference_texture_cr );
 
 	cudaMemcpyAsync( ps_mbs->pui8_reconstructed_Y_host, ps_mbs->pui8_reconstructed_Y_device, i_num_mb * sizeof( UInt8 ) * 256, cudaMemcpyDeviceToHost , ps_mb_cuda->s_stream );
 	cudaMemcpyAsync( ps_mbs->pui8_reconstructed_Cb_host, ps_mbs->pui8_reconstructed_Cb_device, i_num_mb * sizeof( UInt8 ) * 64, cudaMemcpyDeviceToHost, ps_mb_cuda->s_stream );
@@ -773,7 +807,11 @@ Void h261_gpu_device_decode_macroblocks( h261_context_t *ps_ctx )
 
 	d_end = h261_get_time();
 
-	//printf("MB decoder time: %.3fms ( %f )\n", d_end - d_start, f_elapsed_time );
+	printf("MB decoder time: %.3fms ( %f )\n", d_end - d_start, f_elapsed_time );
+
+
+	t_ret = cudaGetLastError( );
+	printf( "last error: %s\n", cudaGetErrorString( t_ret ) );
 }
 
 

@@ -1,4 +1,6 @@
 
+// cudaTextureObject_t ps_current_texture, cudaTextureObject_t ps_reference_texture
+
 #define COEFF_SIZE 8
 
 Void __device__ macroblocks_get_coeffs_ptr( h261_macroblocks_t *ps_mbs, Int32 i_coeff_id, Int32 **ppi_coeffs )
@@ -54,7 +56,7 @@ Int32 __device__ macroblocks_get_coeff_idx( Int32 i_coeff_id )
 
 /* motion compensation */
 
-Void __device__ macroblocks_setup_intra( Int32 *pi_coeffs, Int32 i_pel_x, Int32 i_pel_y )
+Void __device__ macroblocks_setup_intra( cudaTextureObject_t ps_current_texture, Int32 *pi_coeffs, Int32 i_pel_x, Int32 i_pel_y )
 {
 	Int32 i_x, i_y;
 
@@ -63,14 +65,14 @@ Void __device__ macroblocks_setup_intra( Int32 *pi_coeffs, Int32 i_pel_x, Int32 
 		for( i_x = 0; i_x < COEFF_SIZE; i_x++ )
 		{
 			Int32 i_pel;
-			i_pel = tex2D( g_me_gpu_current_texture, (float) i_pel_x + i_x, (float) i_pel_y + i_y );
+			i_pel = tex2D<unsigned char>( ps_current_texture, (float) i_pel_x + i_x, (float) i_pel_y + i_y );
 			pi_coeffs[ ( i_y * COEFF_BLOCK_STRIDE_Y ) + ( i_x * COEFF_BLOCK_STRIDE_X ) ] = i_pel;
 		}
 	}
 }
 
 
-Void __device__ macroblocks_setup_inter( Int32 *pi_coeffs, Int32 i_pel_x, Int32 i_pel_y, Int32 i_mb_flags, Int32 i_mv_x, Int32 i_mv_y )
+Void __device__ macroblocks_setup_inter( cudaTextureObject_t ps_current_texture, cudaTextureObject_t ps_reference_texture, Int32 *pi_coeffs, Int32 i_pel_x, Int32 i_pel_y, Int32 i_mb_flags, Int32 i_mv_x, Int32 i_mv_y )
 {
 	Int32 i_x, i_y;
 
@@ -83,20 +85,20 @@ Void __device__ macroblocks_setup_inter( Int32 *pi_coeffs, Int32 i_pel_x, Int32 
 		{
 			Int32 i_a1, i_a2, i_a3;
 
-			i_a1 = tex2D( g_me_gpu_reference_texture, (float) i_pel_x + i_mv_x, (float) i_pel_y + i_mv_y + i_y );
+			i_a1 = tex2D<unsigned char>( ps_reference_texture, (float) i_pel_x + i_mv_x, (float) i_pel_y + i_mv_y + i_y );
 			rgi_temp[ i_y * 8 + 0 ] = i_a1 * 4;
-			i_a2 = tex2D( g_me_gpu_reference_texture, (float) i_pel_x + i_mv_x + 1, (float) i_pel_y + i_mv_y + i_y );
-			i_a3 = tex2D( g_me_gpu_reference_texture, (float) i_pel_x + i_mv_x + 2, (float) i_pel_y + i_mv_y + i_y );
+			i_a2 = tex2D<unsigned char>( ps_reference_texture, (float) i_pel_x + i_mv_x + 1, (float) i_pel_y + i_mv_y + i_y );
+			i_a3 = tex2D<unsigned char>( ps_reference_texture, (float) i_pel_x + i_mv_x + 2, (float) i_pel_y + i_mv_y + i_y );
 			rgi_temp[ i_y * 8 + 1 ] = i_a1 + i_a2 * 2 + i_a3;
-			i_a1 = tex2D( g_me_gpu_reference_texture, (float) i_pel_x + i_mv_x + 3, (float) i_pel_y + i_mv_y + i_y );
+			i_a1 = tex2D<unsigned char>( ps_reference_texture, (float) i_pel_x + i_mv_x + 3, (float) i_pel_y + i_mv_y + i_y );
 			rgi_temp[ i_y * 8 + 2 ] = i_a2 + i_a3 * 2 + i_a1;
-			i_a2 = tex2D( g_me_gpu_reference_texture, (float) i_pel_x + i_mv_x + 4, (float) i_pel_y + i_mv_y + i_y );
+			i_a2 = tex2D<unsigned char>( ps_reference_texture, (float) i_pel_x + i_mv_x + 4, (float) i_pel_y + i_mv_y + i_y );
 			rgi_temp[ i_y * 8 + 3 ] = i_a3 + i_a1 * 2 + i_a2;
-			i_a3 = tex2D( g_me_gpu_reference_texture, (float) i_pel_x + i_mv_x + 5, (float) i_pel_y + i_mv_y + i_y );
+			i_a3 = tex2D<unsigned char>( ps_reference_texture, (float) i_pel_x + i_mv_x + 5, (float) i_pel_y + i_mv_y + i_y );
 			rgi_temp[ i_y * 8 + 4 ] = i_a1 + i_a2 * 2 + i_a3;
-			i_a1 = tex2D( g_me_gpu_reference_texture, (float) i_pel_x + i_mv_x + 6, (float) i_pel_y + i_mv_y + i_y );
+			i_a1 = tex2D<unsigned char>( ps_reference_texture, (float) i_pel_x + i_mv_x + 6, (float) i_pel_y + i_mv_y + i_y );
 			rgi_temp[ i_y * 8 + 5 ] = i_a2 + i_a3 * 2 + i_a1;
-			i_a2 = tex2D( g_me_gpu_reference_texture, (float) i_pel_x + i_mv_x + 7, (float) i_pel_y + i_mv_y + i_y );
+			i_a2 = tex2D<unsigned char>( ps_reference_texture, (float) i_pel_x + i_mv_x + 7, (float) i_pel_y + i_mv_y + i_y );
 			rgi_temp[ i_y * 8 + 6 ] = i_a3 + i_a1 * 2 + i_a2;
 			rgi_temp[ i_y * 8 + 7 ] = i_a2 * 4;
 		}
@@ -104,7 +106,7 @@ Void __device__ macroblocks_setup_inter( Int32 *pi_coeffs, Int32 i_pel_x, Int32 
 		{
 			Int32 i_a1, i_a2, i_a3;
 
-			i_pel1 = tex2D( g_me_gpu_current_texture, (float) i_pel_x + i_x, (float) i_pel_y + 0 );
+			i_pel1 = tex2D<unsigned char>( ps_current_texture, (float) i_pel_x + i_x, (float) i_pel_y + 0 );
 			i_a1 = rgi_temp[ 8 * 0 + i_x ];
 			i_pel2 = ( i_a1 + 2 ) >> 2;
 			pi_coeffs[ ( 0 * COEFF_BLOCK_STRIDE_Y ) + ( i_x * COEFF_BLOCK_STRIDE_X ) ] = i_pel1 - i_pel2;
@@ -112,36 +114,36 @@ Void __device__ macroblocks_setup_inter( Int32 *pi_coeffs, Int32 i_pel_x, Int32 
 			i_a2 = rgi_temp[ 8 * 1 + i_x ];
 			i_a3 = rgi_temp[ 8 * 2 + i_x ];
 
-			i_pel1 = tex2D( g_me_gpu_current_texture, (float) i_pel_x + i_x, (float) i_pel_y + 1 );
+			i_pel1 = tex2D<unsigned char>( ps_current_texture, (float) i_pel_x + i_x, (float) i_pel_y + 1 );
 			i_pel2 = ( i_a1 + i_a2 * 2 + i_a3 + 8 ) >> 4;
 			pi_coeffs[ ( 1 * COEFF_BLOCK_STRIDE_Y ) + ( i_x * COEFF_BLOCK_STRIDE_X ) ] = i_pel1 - i_pel2;
 
 			i_a1 = rgi_temp[ 8 * 3 + i_x ];
-			i_pel1 = tex2D( g_me_gpu_current_texture, (float) i_pel_x + i_x, (float) i_pel_y + 2 );
+			i_pel1 = tex2D<unsigned char>( ps_current_texture, (float) i_pel_x + i_x, (float) i_pel_y + 2 );
 			i_pel2 = ( i_a2 + i_a3 * 2 + i_a1 + 8 ) >> 4;
 			pi_coeffs[ ( 2 * COEFF_BLOCK_STRIDE_Y ) + ( i_x * COEFF_BLOCK_STRIDE_X ) ] = i_pel1 - i_pel2;
 
 			i_a2 = rgi_temp[ 8 * 4 + i_x ];
-			i_pel1 = tex2D( g_me_gpu_current_texture, (float) i_pel_x + i_x, (float) i_pel_y + 3 );
+			i_pel1 = tex2D<unsigned char>( ps_current_texture, (float) i_pel_x + i_x, (float) i_pel_y + 3 );
 			i_pel2 = ( i_a3 + i_a1 * 2 + i_a2 + 8 ) >> 4;
 			pi_coeffs[ ( 3 * COEFF_BLOCK_STRIDE_Y ) + ( i_x * COEFF_BLOCK_STRIDE_X ) ] = i_pel1 - i_pel2;
 
 			i_a3 = rgi_temp[ 8 * 5 + i_x ];
-			i_pel1 = tex2D( g_me_gpu_current_texture, (float) i_pel_x + i_x, (float) i_pel_y + 4 );
+			i_pel1 = tex2D<unsigned char>( ps_current_texture, (float) i_pel_x + i_x, (float) i_pel_y + 4 );
 			i_pel2 = ( i_a1 + i_a2 * 2 + i_a3 + 8 ) >> 4;
 			pi_coeffs[ ( 4 * COEFF_BLOCK_STRIDE_Y ) + ( i_x * COEFF_BLOCK_STRIDE_X ) ] = i_pel1 - i_pel2;
 
 			i_a1 = rgi_temp[ 8 * 6 + i_x ];
-			i_pel1 = tex2D( g_me_gpu_current_texture, (float) i_pel_x + i_x, (float) i_pel_y + 5 );
+			i_pel1 = tex2D<unsigned char>( ps_current_texture, (float) i_pel_x + i_x, (float) i_pel_y + 5 );
 			i_pel2 = ( i_a2 + i_a3 * 2 + i_a1 + 8 ) >> 4;
 			pi_coeffs[ ( 5 * COEFF_BLOCK_STRIDE_Y ) + ( i_x * COEFF_BLOCK_STRIDE_X ) ] = i_pel1 - i_pel2;
 
 			i_a2 = rgi_temp[ 8 * 7 + i_x ];
-			i_pel1 = tex2D( g_me_gpu_current_texture, (float) i_pel_x + i_x, (float) i_pel_y + 6 );
+			i_pel1 = tex2D<unsigned char>( ps_current_texture, (float) i_pel_x + i_x, (float) i_pel_y + 6 );
 			i_pel2 = ( i_a3 + i_a1 * 2 + i_a2 + 8 ) >> 4;
 			pi_coeffs[ ( 6 * COEFF_BLOCK_STRIDE_Y ) + ( i_x * COEFF_BLOCK_STRIDE_X ) ] = i_pel1 - i_pel2;
 
-			i_pel1 = tex2D( g_me_gpu_current_texture, (float) i_pel_x + i_x, (float) i_pel_y + 7 );
+			i_pel1 = tex2D<unsigned char>( ps_current_texture, (float) i_pel_x + i_x, (float) i_pel_y + 7 );
 			i_pel2 = ( i_a2 + 2 ) >> 2;
 			pi_coeffs[ ( 7 * COEFF_BLOCK_STRIDE_Y ) + ( i_x * COEFF_BLOCK_STRIDE_X ) ] = i_pel1 - i_pel2;
 		}
@@ -154,8 +156,8 @@ Void __device__ macroblocks_setup_inter( Int32 *pi_coeffs, Int32 i_pel_x, Int32 
 			{
 				Int32 i_pel1, i_pel2;
 
-				i_pel1 = tex2D( g_me_gpu_current_texture, (float) i_pel_x + i_x, (float) i_pel_y + i_y );
-				i_pel2 = tex2D( g_me_gpu_reference_texture, (float) i_pel_x + i_x + i_mv_x, (float) i_pel_y + i_y + i_mv_y );
+				i_pel1 = tex2D<unsigned char>( ps_current_texture, (float) i_pel_x + i_x, (float) i_pel_y + i_y );
+				i_pel2 = tex2D<unsigned char>( ps_reference_texture, (float) i_pel_x + i_x + i_mv_x, (float) i_pel_y + i_y + i_mv_y );
 
 				pi_coeffs[ ( i_y * COEFF_BLOCK_STRIDE_Y ) + ( i_x * COEFF_BLOCK_STRIDE_X ) ] = i_pel1 - i_pel2;
 			}
@@ -167,7 +169,7 @@ Void __device__ macroblocks_setup_inter( Int32 *pi_coeffs, Int32 i_pel_x, Int32 
 #define SETUP_MACROBLOCKS_LUMA_BLOCK_DIM_X 128
 #define SETUP_MACROBLOCKS_LUMA_BLOCK_DIM_Y 1
 
-Void __global__ macroblocks_setup_luma( )
+Void __global__ macroblocks_setup_luma( cudaTextureObject_t ps_current_texture, cudaTextureObject_t ps_reference_texture )
 {
 	Int32 *pi_coeffs;
 	Int32 i_coeff_id, i_coeff_x, i_coeff_y, i_coeff_idx;
@@ -219,11 +221,11 @@ Void __global__ macroblocks_setup_luma( )
 	switch( i_mb_type )
 	{
 	case H261_MB_TYPE_INTRA:
-		macroblocks_setup_intra( pi_coeffs, i_pel_x, i_pel_y );
+		macroblocks_setup_intra( ps_current_texture, pi_coeffs, i_pel_x, i_pel_y );
 	break;
 
 	case H261_MB_TYPE_INTER:
-		macroblocks_setup_inter( pi_coeffs, i_pel_x, i_pel_y, i_mb_flags, i_mv_x, i_mv_y );
+		macroblocks_setup_inter( ps_current_texture, ps_reference_texture, pi_coeffs, i_pel_x, i_pel_y, i_mb_flags, i_mv_x, i_mv_y );
 	break;
 	}
 }
@@ -232,7 +234,7 @@ Void __global__ macroblocks_setup_luma( )
 #define SETUP_MACROBLOCKS_CHROMA_BLOCK_DIM_X 128
 #define SETUP_MACROBLOCKS_CHROMA_BLOCK_DIM_Y 1
 
-Void __global__ macroblocks_setup_chromab( )
+Void __global__ macroblocks_setup_chromab( cudaTextureObject_t ps_current_texture, cudaTextureObject_t ps_reference_texture )
 {
 	Int32 *pi_coeffs;
 	Int32 i_coeff_id, i_coeff_idx, i_mb_flags;
@@ -269,16 +271,16 @@ Void __global__ macroblocks_setup_chromab( )
 	switch( ps_mb->i_macroblock_type )
 	{
 	case H261_MB_TYPE_INTRA:
-		macroblocks_setup_intra( pi_coeffs, i_pel_x, i_pel_y );
+		macroblocks_setup_intra( ps_current_texture, pi_coeffs, i_pel_x, i_pel_y );
 	break;
 
 	case H261_MB_TYPE_INTER:
-		macroblocks_setup_inter( pi_coeffs, i_pel_x, i_pel_y, i_mb_flags, i_mv_x, i_mv_y );
+		macroblocks_setup_inter( ps_current_texture, ps_reference_texture, pi_coeffs, i_pel_x, i_pel_y, i_mb_flags, i_mv_x, i_mv_y );
 	break;
 	}
 }
 
-Void __global__ macroblocks_setup_chromar( )
+Void __global__ macroblocks_setup_chromar( cudaTextureObject_t ps_current_texture, cudaTextureObject_t ps_reference_texture )
 {
 	Int32 *pi_coeffs;
 	Int32 i_coeff_id, i_coeff_idx, i_mb_flags;
@@ -315,11 +317,11 @@ Void __global__ macroblocks_setup_chromar( )
 	switch( ps_mb->i_macroblock_type )
 	{
 	case H261_MB_TYPE_INTRA:
-		macroblocks_setup_intra( pi_coeffs, i_pel_x, i_pel_y );
+		macroblocks_setup_intra( ps_current_texture, pi_coeffs, i_pel_x, i_pel_y );
 	break;
 
 	case H261_MB_TYPE_INTER:
-		macroblocks_setup_inter( pi_coeffs, i_pel_x, i_pel_y, i_mb_flags, i_mv_x, i_mv_y );
+		macroblocks_setup_inter( ps_current_texture, ps_reference_texture, pi_coeffs, i_pel_x, i_pel_y, i_mb_flags, i_mv_x, i_mv_y );
 	break;
 	}
 }
@@ -1001,7 +1003,7 @@ Void __device__ macroblocks_reconstruct_intra( UInt8 *pui8_destination, Int32 i_
 }
 
 
-Void __device__ macroblocks_reconstruct_inter( UInt8 *pui8_destination, Int32 i_destination_stride, Int32 *pi_coeffs, Int32 i_mb_flags, Int32 i_mv_x, Int32 i_mv_y )
+Void __device__ macroblocks_reconstruct_inter( cudaTextureObject_t ps_reference_texture, UInt8 *pui8_destination, Int32 i_destination_stride, Int32 *pi_coeffs, Int32 i_mb_flags, Int32 i_mv_x, Int32 i_mv_y )
 {
 	Int32 i_x, i_y;
 
@@ -1014,20 +1016,20 @@ Void __device__ macroblocks_reconstruct_inter( UInt8 *pui8_destination, Int32 i_
 		{
 			Int32 i_a1, i_a2, i_a3;
 
-			i_a1 = tex2D( g_me_gpu_reference_texture, (float) i_mv_x + i_x, (float) i_mv_y + 0 );
+			i_a1 = tex2D<unsigned char>( ps_reference_texture, (float) i_mv_x + i_x, (float) i_mv_y + 0 );
 			rgi_temp[ 0 * 8 + i_x ] = i_a1 * 4;
-			i_a2 = tex2D( g_me_gpu_reference_texture, (float) i_mv_x + i_x, (float) i_mv_y + 1 );
-			i_a3 = tex2D( g_me_gpu_reference_texture, (float) i_mv_x + i_x, (float) i_mv_y + 2 );
+			i_a2 = tex2D<unsigned char>( ps_reference_texture, (float) i_mv_x + i_x, (float) i_mv_y + 1 );
+			i_a3 = tex2D<unsigned char>( ps_reference_texture, (float) i_mv_x + i_x, (float) i_mv_y + 2 );
 			rgi_temp[ 1 * 8 + i_x ] = i_a1 + i_a2 * 2 + i_a3;
-			i_a1 = tex2D( g_me_gpu_reference_texture, (float) i_mv_x + i_x, (float) i_mv_y + 3 );
+			i_a1 = tex2D<unsigned char>( ps_reference_texture, (float) i_mv_x + i_x, (float) i_mv_y + 3 );
 			rgi_temp[ 2 * 8 + i_x ] = i_a2 + i_a3 * 2 + i_a1;
-			i_a2 = tex2D( g_me_gpu_reference_texture, (float) i_mv_x + i_x, (float) i_mv_y + 4 );
+			i_a2 = tex2D<unsigned char>( ps_reference_texture, (float) i_mv_x + i_x, (float) i_mv_y + 4 );
 			rgi_temp[ 3 * 8 + i_x ] = i_a3 + i_a1 * 2 + i_a2;
-			i_a3 = tex2D( g_me_gpu_reference_texture, (float) i_mv_x + i_x, (float) i_mv_y + 5 );
+			i_a3 = tex2D<unsigned char>( ps_reference_texture, (float) i_mv_x + i_x, (float) i_mv_y + 5 );
 			rgi_temp[ 4 * 8 + i_x ] = i_a1 + i_a2 * 2 + i_a3;
-			i_a1 = tex2D( g_me_gpu_reference_texture, (float) i_mv_x + i_x, (float) i_mv_y + 6 );
+			i_a1 = tex2D<unsigned char>( ps_reference_texture, (float) i_mv_x + i_x, (float) i_mv_y + 6 );
 			rgi_temp[ 5 * 8 + i_x ] = i_a2 + i_a3 * 2 + i_a1;
-			i_a2 = tex2D( g_me_gpu_reference_texture, (float) i_mv_x + i_x, (float) i_mv_y + 7 );
+			i_a2 = tex2D<unsigned char>( ps_reference_texture, (float) i_mv_x + i_x, (float) i_mv_y + 7 );
 			rgi_temp[ 6 * 8 + i_x ] = i_a3 + i_a1 * 2 + i_a2;
 			rgi_temp[ 7 * 8 + i_x ] = i_a2 * 4;
 		}
@@ -1086,7 +1088,7 @@ Void __device__ macroblocks_reconstruct_inter( UInt8 *pui8_destination, Int32 i_
 				Int32 i_pel1, i_pel2;
 
 				i_pel1 = pi_coeffs[ i_y * COEFF_BLOCK_STRIDE_Y + i_x * COEFF_BLOCK_STRIDE_X ];
-				i_pel2 = tex2D( g_me_gpu_reference_texture, (float) i_x + i_mv_x, (float) i_y + i_mv_y );
+				i_pel2 = tex2D<unsigned char>( ps_reference_texture, (float) i_x + i_mv_x, (float) i_y + i_mv_y );
 				pui8_destination[ i_y * i_destination_stride + i_x ] = CLAMP_255U( i_pel1 + i_pel2 );
 			}
 		}
@@ -1094,7 +1096,7 @@ Void __device__ macroblocks_reconstruct_inter( UInt8 *pui8_destination, Int32 i_
 }
 
 
-Void __global__ macroblocks_reconstruct_luma( )
+Void __global__ macroblocks_reconstruct_luma( cudaTextureObject_t ps_reference_texture )
 {
 	Int32 *pi_coeffs;
 	Int32 i_coeff_id, i_coeff_x, i_coeff_y, i_coeff_idx;
@@ -1150,7 +1152,7 @@ Void __global__ macroblocks_reconstruct_luma( )
 	break;
 
 	case H261_MB_TYPE_INTER:
-		macroblocks_reconstruct_inter( pui8_destination, i_destination_stride, pi_coeffs, i_mb_flags, i_mv_x, i_mv_y );
+		macroblocks_reconstruct_inter( ps_reference_texture, pui8_destination, i_destination_stride, pi_coeffs, i_mb_flags, i_mv_x, i_mv_y );
 	break;
 	}
 }
@@ -1159,7 +1161,7 @@ Void __global__ macroblocks_reconstruct_luma( )
 #define RECON_MACROBLOCKS_CHROMA_BLOCK_DIM_X 128
 #define RECON_MACROBLOCKS_CHROMA_BLOCK_DIM_Y 1
 
-Void __global__ macroblocks_reconstruct_chromab( )
+Void __global__ macroblocks_reconstruct_chromab( cudaTextureObject_t ps_reference_texture )
 {
 	Int32 *pi_coeffs;
 	Int32 i_coeff_id, i_coeff_idx, i_mb_flags;
@@ -1211,13 +1213,13 @@ Void __global__ macroblocks_reconstruct_chromab( )
 	break;
 
 	case H261_MB_TYPE_INTER:
-		macroblocks_reconstruct_inter( pui8_destination, i_destination_stride, pi_coeffs, i_mb_flags, i_mv_x, i_mv_y );
+		macroblocks_reconstruct_inter( ps_reference_texture, pui8_destination, i_destination_stride, pi_coeffs, i_mb_flags, i_mv_x, i_mv_y );
 	break;
 	}
 }
 
 
-Void __global__ macroblocks_reconstruct_chromar( )
+Void __global__ macroblocks_reconstruct_chromar( cudaTextureObject_t ps_reference_texture )
 {
 	Int32 *pi_coeffs;
 	Int32 i_coeff_id, i_coeff_idx, i_mb_flags;
@@ -1269,7 +1271,7 @@ Void __global__ macroblocks_reconstruct_chromar( )
 	break;
 
 	case H261_MB_TYPE_INTER:
-		macroblocks_reconstruct_inter( pui8_destination, i_destination_stride, pi_coeffs, i_mb_flags, i_mv_x, i_mv_y );
+		macroblocks_reconstruct_inter( ps_reference_texture, pui8_destination, i_destination_stride, pi_coeffs, i_mb_flags, i_mv_x, i_mv_y );
 	break;
 	}
 }

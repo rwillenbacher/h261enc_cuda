@@ -1,6 +1,6 @@
 
 
-Int32 __device__ megpu_sad_16x16( Int16 i_pel1_x, Int16 i_pel1_y, Int16 i_pel2_x, Int16 i_pel2_y )
+Int32 __device__ megpu_sad_16x16( cudaTextureObject_t ps_current_texture, cudaTextureObject_t ps_reference_texture, Int16 i_pel1_x, Int16 i_pel1_y, Int16 i_pel2_x, Int16 i_pel2_y )
 {
 	Int8 i_y, i_x;
 	Int32 i_sad = 0;
@@ -12,8 +12,8 @@ Int32 __device__ megpu_sad_16x16( Int16 i_pel1_x, Int16 i_pel1_y, Int16 i_pel2_x
 		for( i_x = 0; i_x < MB_SIZE; i_x++ )
 		{
 			Int32 pel1, pel2;
-			pel1 = tex2D( g_me_gpu_current_texture, (float) i_pel1_x + i_x, (float) i_pel1_y + i_y );
-			pel2 = tex2D( g_me_gpu_reference_texture, (float) i_pel2_x + i_x, (float) i_pel2_y + i_y );
+			pel1 = tex2D<unsigned char>( ps_current_texture, (float) i_pel1_x + i_x, (float) i_pel1_y + i_y );
+			pel2 = tex2D<unsigned char>( ps_reference_texture, (float) i_pel2_x + i_x, (float) i_pel2_y + i_y );
 			i_sad = __sad( pel1, pel2, i_sad );
 		}
 	}
@@ -24,7 +24,7 @@ Int32 __device__ megpu_sad_16x16( Int16 i_pel1_x, Int16 i_pel1_y, Int16 i_pel2_x
 #define STARTING_VECTOR_DIMENSIONS	( 11 )
 #define STARTING_VECTOR_NUM_THREADS ( STARTING_VECTOR_DIMENSIONS * STARTING_VECTOR_DIMENSIONS )
 
-Void __global__ megpu_get_starting_vector( )
+Void __global__ megpu_get_starting_vector( cudaTextureObject_t ps_current_texture, cudaTextureObject_t ps_reference_texture )
 {
 	const Int8 rgi8_test_vectors[ STARTING_VECTOR_DIMENSIONS ] =
 	{
@@ -84,7 +84,7 @@ Void __global__ megpu_get_starting_vector( )
 
 	if( i_skip == 0 )
 	{
-		rgui16_test_vector_cost[ i_tid ] = megpu_sad_16x16( i_block_x, i_block_y, i_block_x + i_test_x, i_block_y + i_test_y );
+		rgui16_test_vector_cost[ i_tid ] = megpu_sad_16x16( ps_current_texture, ps_reference_texture, i_block_x, i_block_y, i_block_x + i_test_x, i_block_y + i_test_y );
 	}
 	else
 	{
@@ -165,7 +165,7 @@ Void __global__ megpu_get_starting_vector( )
 	}
 }
 
-
+/*
 #define STARTING_VECTOR_DIAMOND_DIMENSIONS_X	( 4 )
 #define STARTING_VECTOR_DIAMOND_DIMENSIONS_Y	( 1 )
 #define STARTING_VECTOR_DIAMOND_SEARCH_THREADS_X 
@@ -192,8 +192,8 @@ Void __global__ megpu_get_starting_vector_diamond( )
 	ps_me_gpu = &g_me_constant_gpu_device;
 
 	i_block_idx = ( blockIdx.x * STARTING_VECTOR_DIAMOND_DIMENSIONS_X ) + threadIdx.x;
-	i_block_x = i_block_idx % i_mb_width;
-	i_block_y = i_block_idx / i_mb_width;
+	i_block_x = i_block_idx % ps_me_gpu->i_mb_width;
+	i_block_y = i_block_idx / ps_me_gpu->i_mb_width;
 	i_block_x *= 16;
 	i_block_y *= 16;
 
@@ -203,8 +203,8 @@ Void __global__ megpu_get_starting_vector_diamond( )
 	pi8_motion_vector_limits = ps_me_gpu->pi8_motion_vector_limits_device;
 	pi8_motion_vector_limits += i_block_idx * 4;
 
-	rgi8_test_vector[ i_tid * 2 ] = i_test_x;
-	rgi8_test_vector[ i_tid * 2 + 1 ] = i_test_y;
+	ps_me_gpu->rgi8_test_vector[ i_tid * 2 ] = i_test_x;
+	ps_me_gpu->rgi8_test_vector[ i_tid * 2 + 1 ] = i_test_y;
 
 	i_min_x = pi8_motion_vector_limits[ 0 ];
 	i_max_x = pi8_motion_vector_limits[ 1 ];
@@ -213,7 +213,7 @@ Void __global__ megpu_get_starting_vector_diamond( )
 	
 
 }
-
+*/
 /*
 #define REFINE_STARTING_VECTOR_BLOCK_DIM_X 8
 #define REFINE_STARTING_VECTOR_BLOCK_DIM_Y 6
@@ -304,7 +304,7 @@ Void __global__ megpu_refine_starting_vector( )
 #define REFINE_STARTING_VECTOR_DIMENSIONS	( 7 )
 #define REFINE_STARTING_VECTOR_NUM_THREADS ( REFINE_STARTING_VECTOR_DIMENSIONS * REFINE_STARTING_VECTOR_DIMENSIONS )
 
-Void __global__ megpu_refine_starting_vector( )
+Void __global__ megpu_refine_starting_vector( cudaTextureObject_t ps_current_texture, cudaTextureObject_t ps_reference_texture )
 {
 	const Int8 rgi8_test_vectors[ STARTING_VECTOR_DIMENSIONS ] =
 	{
@@ -364,7 +364,7 @@ Void __global__ megpu_refine_starting_vector( )
 
 	if( i_skip == 0 )
 	{
-		rgui16_test_vector_cost[ i_tid ] = megpu_sad_16x16( i_block_x, i_block_y, i_block_x + i_test_x, i_block_y + i_test_y );
+		rgui16_test_vector_cost[ i_tid ] = megpu_sad_16x16( ps_current_texture, ps_reference_texture, i_block_x, i_block_y, i_block_x + i_test_x, i_block_y + i_test_y );
 	}
 	else
 	{
@@ -614,7 +614,7 @@ Int32 __device__ megpu_satd_8x8_kernel( Int16 *pi16_delta )
 
 
 
-Void __global__ megpu_evaluate_motion_vector_inter()
+Void __global__ megpu_evaluate_motion_vector_inter( cudaTextureObject_t ps_current_texture, cudaTextureObject_t ps_reference_texture )
 {
 	Int32 i_block_x, i_block_y, i_sub_block_x, i_sub_block_y, i_block_idx, i_sub_block_idx;
 	Int32 i_x, i_y, i_sub_block_mv_x, i_sub_block_mv_y;
@@ -669,8 +669,8 @@ Void __global__ megpu_evaluate_motion_vector_inter()
 		for( i_x = 0; i_x < EVALUATE_BLOCK_SIZE; i_x++ )
 		{
 			Int32 i_pel1, i_pel2;
-			i_pel1 = tex2D( g_me_gpu_current_texture, (float) i_sub_block_x + i_x, (float) i_sub_block_y + i_y );
-			i_pel2 = tex2D( g_me_gpu_reference_texture, (float) i_sub_block_mv_x + i_x, (float) i_sub_block_mv_y + i_y );
+			i_pel1 = tex2D<unsigned char>( ps_current_texture, (float) i_sub_block_x + i_x, (float) i_sub_block_y + i_y );
+			i_pel2 = tex2D<unsigned char>( ps_reference_texture, (float) i_sub_block_mv_x + i_x, (float) i_sub_block_mv_y + i_y );
 			rgi16_block_data[ i_x + ( i_y * EVALUATE_BLOCK_SIZE ) ] = i_pel1 - i_pel2;
 		}
 	}
@@ -721,7 +721,7 @@ Void __global__ megpu_evaluate_motion_vector_inter()
 }
 
 
-Void __global__ megpu_evaluate_motion_vector_inter_filter()
+Void __global__ megpu_evaluate_motion_vector_inter_filter( cudaTextureObject_t ps_current_texture, cudaTextureObject_t ps_reference_texture )
 {
 	Int32 i_block_x, i_block_y, i_sub_block_x, i_sub_block_y, i_block_idx, i_sub_block_idx;
 	Int32 i_x, i_y, i_sub_block_mv_x, i_sub_block_mv_y;
@@ -777,8 +777,8 @@ Void __global__ megpu_evaluate_motion_vector_inter_filter()
 		for( i_x = 0; i_x < EVALUATE_BLOCK_SIZE; i_x++ )
 		{
 			Int32 i_pel1, i_pel2;
-			i_pel1 = tex2D( g_me_gpu_current_texture, (float) i_sub_block_x + i_x, (float) i_sub_block_y + i_y );
-			i_pel2 = tex2D( g_me_gpu_reference_texture, (float) i_sub_block_mv_x + i_x, (float) i_sub_block_mv_y + i_y );
+			i_pel1 = tex2D<unsigned char>( ps_current_texture, (float) i_sub_block_x + i_x, (float) i_sub_block_y + i_y );
+			i_pel2 = tex2D<unsigned char>( ps_reference_texture, (float) i_sub_block_mv_x + i_x, (float) i_sub_block_mv_y + i_y );
 			rgi16_block_data[ i_x + ( i_y * EVALUATE_BLOCK_SIZE ) ] = i_pel1 - i_pel2;
 		}
 	}
@@ -791,19 +791,19 @@ Void __global__ megpu_evaluate_motion_vector_inter_filter()
 		{
 			Int32 a1, a2, a3, a4, a5, a6, a7, a8, a9;
 			Int32 i_pel1, i_pel2;
-			i_pel1 = tex2D( g_me_gpu_current_texture, (float) i_sub_block_x + i_x, (float) i_sub_block_y + i_y );
+			i_pel1 = tex2D( ps_current_texture, (float) i_sub_block_x + i_x, (float) i_sub_block_y + i_y );
 
-			a1 = tex2D( g_me_gpu_reference_texture, (float) i_sub_block_mv_x + i_x - 1, (float) i_sub_block_mv_y + i_y - 1 );
-			a2 = tex2D( g_me_gpu_reference_texture, (float) i_sub_block_mv_x + i_x, (float) i_sub_block_mv_y + i_y - 1 );
-			a3 = tex2D( g_me_gpu_reference_texture, (float) i_sub_block_mv_x + i_x + 1, (float) i_sub_block_mv_y + i_y - 1 );
+			a1 = tex2D( ps_reference_texture, (float) i_sub_block_mv_x + i_x - 1, (float) i_sub_block_mv_y + i_y - 1 );
+			a2 = tex2D( ps_reference_texture, (float) i_sub_block_mv_x + i_x, (float) i_sub_block_mv_y + i_y - 1 );
+			a3 = tex2D( ps_reference_texture, (float) i_sub_block_mv_x + i_x + 1, (float) i_sub_block_mv_y + i_y - 1 );
 
-			a4 = tex2D( g_me_gpu_reference_texture, (float) i_sub_block_mv_x + i_x - 1, (float) i_sub_block_mv_y + i_y );
-			a5 = tex2D( g_me_gpu_reference_texture, (float) i_sub_block_mv_x + i_x, (float) i_sub_block_mv_y + i_y );
-			a6 = tex2D( g_me_gpu_reference_texture, (float) i_sub_block_mv_x + i_x + 1, (float) i_sub_block_mv_y + i_y );
+			a4 = tex2D( ps_reference_texture, (float) i_sub_block_mv_x + i_x - 1, (float) i_sub_block_mv_y + i_y );
+			a5 = tex2D( ps_reference_texture, (float) i_sub_block_mv_x + i_x, (float) i_sub_block_mv_y + i_y );
+			a6 = tex2D( ps_reference_texture, (float) i_sub_block_mv_x + i_x + 1, (float) i_sub_block_mv_y + i_y );
 
-			a7 = tex2D( g_me_gpu_reference_texture, (float) i_sub_block_mv_x + i_x - 1, (float) i_sub_block_mv_y + i_y + 1 );
-			a8 = tex2D( g_me_gpu_reference_texture, (float) i_sub_block_mv_x + i_x, (float) i_sub_block_mv_y + i_y + 1 );
-			a9 = tex2D( g_me_gpu_reference_texture, (float) i_sub_block_mv_x + i_x + 1, (float) i_sub_block_mv_y + i_y + 1 );
+			a7 = tex2D( ps_reference_texture, (float) i_sub_block_mv_x + i_x - 1, (float) i_sub_block_mv_y + i_y + 1 );
+			a8 = tex2D( ps_reference_texture, (float) i_sub_block_mv_x + i_x, (float) i_sub_block_mv_y + i_y + 1 );
+			a9 = tex2D( ps_reference_texture, (float) i_sub_block_mv_x + i_x + 1, (float) i_sub_block_mv_y + i_y + 1 );
 
 			i_pel2 = ( a1 + ( a2 * 2 ) + a3 + ( a4 * 2 ) + ( a5 * 4 ) + ( a6 * 2 ) + a7 + ( a8 * 2 ) + a9 + 8 ) / 16;
 
@@ -858,19 +858,19 @@ Void __global__ megpu_evaluate_motion_vector_inter_filter()
 		{
 			Int32 a1, a2, a3, a4, a5, a6, a7, a8, a9;
 			Int32 i_pel1, i_pel2;
-			i_pel1 = tex2D( g_me_gpu_current_texture, (float) i_sub_block_x + i_x, (float) i_sub_block_y + i_y );
+			i_pel1 = tex2D<unsigned char>( ps_current_texture, (float) i_sub_block_x + i_x, (float) i_sub_block_y + i_y );
 
-			a1 = tex2D( g_me_gpu_reference_texture, (float) i_sub_block_mv_x + i_x - 1, (float) i_sub_block_mv_y + i_y - 1 );
-			a2 = tex2D( g_me_gpu_reference_texture, (float) i_sub_block_mv_x + i_x, (float) i_sub_block_mv_y + i_y - 1 );
-			a3 = tex2D( g_me_gpu_reference_texture, (float) i_sub_block_mv_x + i_x + 1, (float) i_sub_block_mv_y + i_y - 1 );
+			a1 = tex2D<unsigned char>( ps_reference_texture, (float) i_sub_block_mv_x + i_x - 1, (float) i_sub_block_mv_y + i_y - 1 );
+			a2 = tex2D<unsigned char>( ps_reference_texture, (float) i_sub_block_mv_x + i_x, (float) i_sub_block_mv_y + i_y - 1 );
+			a3 = tex2D<unsigned char>( ps_reference_texture, (float) i_sub_block_mv_x + i_x + 1, (float) i_sub_block_mv_y + i_y - 1 );
 
-			a4 = tex2D( g_me_gpu_reference_texture, (float) i_sub_block_mv_x + i_x - 1, (float) i_sub_block_mv_y + i_y );
-			a5 = tex2D( g_me_gpu_reference_texture, (float) i_sub_block_mv_x + i_x, (float) i_sub_block_mv_y + i_y );
-			a6 = tex2D( g_me_gpu_reference_texture, (float) i_sub_block_mv_x + i_x + 1, (float) i_sub_block_mv_y + i_y );
+			a4 = tex2D<unsigned char>( ps_reference_texture, (float) i_sub_block_mv_x + i_x - 1, (float) i_sub_block_mv_y + i_y );
+			a5 = tex2D<unsigned char>( ps_reference_texture, (float) i_sub_block_mv_x + i_x, (float) i_sub_block_mv_y + i_y );
+			a6 = tex2D<unsigned char>( ps_reference_texture, (float) i_sub_block_mv_x + i_x + 1, (float) i_sub_block_mv_y + i_y );
 
-			a7 = tex2D( g_me_gpu_reference_texture, (float) i_sub_block_mv_x + i_x - 1, (float) i_sub_block_mv_y + i_y + 1 );
-			a8 = tex2D( g_me_gpu_reference_texture, (float) i_sub_block_mv_x + i_x, (float) i_sub_block_mv_y + i_y + 1 );
-			a9 = tex2D( g_me_gpu_reference_texture, (float) i_sub_block_mv_x + i_x + 1, (float) i_sub_block_mv_y + i_y + 1 );
+			a7 = tex2D<unsigned char>( ps_reference_texture, (float) i_sub_block_mv_x + i_x - 1, (float) i_sub_block_mv_y + i_y + 1 );
+			a8 = tex2D<unsigned char>( ps_reference_texture, (float) i_sub_block_mv_x + i_x, (float) i_sub_block_mv_y + i_y + 1 );
+			a9 = tex2D<unsigned char>( ps_reference_texture, (float) i_sub_block_mv_x + i_x + 1, (float) i_sub_block_mv_y + i_y + 1 );
 
 			i_pel2 = ( a1 + ( a2 * 2 ) + a3 + ( a4 * 2 ) + ( a5 * 4 ) + ( a6 * 2 ) + a7 + ( a8 * 2 ) + a9 + 8 ) / 16;
 
@@ -904,14 +904,12 @@ Void __global__ megpu_evaluate_motion_vector_inter_filter()
 	}
 }
 
-Void __global__ megpu_evaluate_motion_vector_intra()
+Void __global__ megpu_evaluate_motion_vector_intra( cudaTextureObject_t ps_current_texture )
 {
 	Int32 i_block_x, i_block_y, i_sub_block_x, i_sub_block_y, i_block_idx, i_sub_block_idx;
 	Int32 i_x, i_y;
 	Int32 i_is_top_left, i_stride;
 	
-	Int32 i_mb_x, i_mb_y, i_mb_idx, i_dc;
-
 	me_gpu_t *ps_me_gpu;
 	me_gpu_mb_t *ps_mb;
 
@@ -955,9 +953,8 @@ Void __global__ megpu_evaluate_motion_vector_intra()
 	{
 		for( i_x = 0; i_x < EVALUATE_BLOCK_SIZE; i_x++ )
 		{
-			Int32 i_pel1, i_pel2;
-			i_pel1 = tex2D( g_me_gpu_current_texture, (float) i_sub_block_x + i_x, (float) i_sub_block_y + i_y );
-			i_pel2 = i_dc;
+			Int32 i_pel1;
+			i_pel1 = tex2D<unsigned char>( ps_current_texture, (float) i_sub_block_x + i_x, (float) i_sub_block_y + i_y );
 			rgi16_block_data[ i_x + ( i_y * EVALUATE_BLOCK_SIZE ) ] = i_pel1;
 		}
 	}
